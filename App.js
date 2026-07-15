@@ -1,20 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, Dimensions, Platform, Animated, TouchableWithoutFeedback } from 'react-native';
+import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, Dimensions, Platform, Animated, TouchableWithoutFeedback, Modal, ScrollView } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 
-const FloatingClick = ({ x, y }) => {
+const FloatingClick = ({ x, y, val }) => {
   const translateY = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(translateY, {
-        toValue: -100,
-        duration: 800,
+        toValue: -150,
+        duration: 1000,
         useNativeDriver: true,
       }),
       Animated.timing(opacity, {
         toValue: 0,
-        duration: 800,
+        duration: 1000,
         useNativeDriver: true,
       })
     ]).start();
@@ -31,37 +35,110 @@ const FloatingClick = ({ x, y }) => {
       opacity: opacity,
       transform: [{ translateY }]
     }}>
-      +10
+      +{val}
     </Animated.Text>
   );
 };
-import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+
+const rankConfigs = [
+  { name: 'Bronze', icon: 'medal', color: '#CD7F32' },
+  { name: 'Silver', icon: 'medal', color: '#C0C0C0' },
+  { name: 'Gold', icon: 'medal', color: '#FFD700' },
+  { name: 'Platinum', icon: 'gem', color: '#E5E4E2' },
+  { name: 'Diamond', icon: 'gem', color: '#b9f2ff' },
+  { name: 'Crown', icon: 'crown', color: '#FFDF00' },
+];
+
+const getCumulativeCost = (L) => {
+  if (L <= 1) return 0;
+  if (L === 2) return 1000;
+  if (L === 3) return 5000;
+  
+  let cost = 5000;
+  let currentGap = 4000;
+  
+  for (let i = 4; i <= L; i++) {
+    currentGap += 3625;
+    cost += currentGap;
+  }
+  return Math.round(cost / 100) * 100; // Round to nearest 100 for clean numbers
+};
+
+const ALL_RANKS = [];
+for (let L = 1; L <= 18; L++) {
+  const rankIndex = Math.floor((L - 1) / 3);
+  const subLevel = ((L - 1) % 3) + 1;
+  ALL_RANKS.push({
+    globalLevel: L,
+    name: rankConfigs[rankIndex].name,
+    level: subLevel,
+    icon: rankConfigs[rankIndex].icon,
+    color: rankConfigs[rankIndex].color,
+    cost: getCumulativeCost(L)
+  });
+}
+ALL_RANKS.push({
+  globalLevel: 19,
+  name: 'Ace',
+  level: '',
+  icon: 'trophy',
+  color: '#FF4500',
+  cost: getCumulativeCost(19),
+  isAce: true
+});
+
+const RANK_IMAGES = [
+  require('./assets/hamster_1.png'), // Bronze (levels 1-3)
+  require('./assets/hamster_2.png'), // Silver (levels 4-6)
+  require('./assets/hamster_3.png'), // Gold   (levels 7-9)
+  require('./assets/hamster_4.png'), // Platinum (levels 10-12)
+  require('./assets/hamster_5.png'), // Diamond (levels 13-15)
+  require('./assets/hamster_6.png'), // Crown  (levels 16-18)
+  require('./assets/hedgehog.png'),  // Ace    (level 19+)
+];
 
 export default function App() {
-  const [balance, setBalance] = useState(20000000);
+  const [balance, setBalance] = useState(1);
+  const [energy, setEnergy] = useState(2000);
   const scaleValue = useRef(new Animated.Value(1)).current;
   const [clicks, setClicks] = useState([]);
   const [activeTab, setActiveTab] = useState('Exchange');
-  const [showTapsLeft, setShowTapsLeft] = useState(false);
+  const [showRanksModal, setShowRanksModal] = useState(false);
+
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const savedBalance = await SecureStore.getItemAsync('balance');
+        const savedEnergy = await SecureStore.getItemAsync('energy');
+        if (savedBalance !== null) setBalance(parseInt(savedBalance, 10));
+        if (savedEnergy !== null) setEnergy(parseInt(savedEnergy, 10));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    const saveData = async () => {
+      try {
+        await SecureStore.setItemAsync('balance', balance.toString());
+        await SecureStore.setItemAsync('energy', energy.toString());
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    saveData();
+  }, [balance, energy]);
 
   const getRank = (bal) => {
-    const rankConfigs = [
-      { name: 'Bronze', icon: 'medal', color: '#CD7F32' },
-      { name: 'Silver', icon: 'medal', color: '#C0C0C0' },
-      { name: 'Gold', icon: 'medal', color: '#FFD700' },
-      { name: 'Platinum', icon: 'gem', color: '#E5E4E2' },
-      { name: 'Diamond', icon: 'gem', color: '#b9f2ff' },
-      { name: 'Crown', icon: 'crown', color: '#FFDF00' },
-    ];
-    
-    const getCumulativeCost = (L) => {
-      if (L <= 1) return 0;
-      return 3000 * (L - 1) + 1000 * (L - 1) * (L - 2);
-    };
 
     let L = 1;
     while (L <= 18) {
@@ -72,7 +149,7 @@ export default function App() {
         const rankIndex = Math.floor((L - 1) / 3);
         const subLevel = ((L - 1) % 3) + 1;
         const config = rankConfigs[rankIndex];
-        return { name: config.name, level: subLevel, min: currentLevelCost, max: nextLevelCost, icon: config.icon, color: config.color };
+        return { name: config.name, level: subLevel, globalLevel: L, min: currentLevelCost, max: nextLevelCost, icon: config.icon, color: config.color };
       }
       L++;
     }
@@ -83,39 +160,61 @@ export default function App() {
     const aceLevel = Math.max(1, Math.floor((bal - aceBaseCumulative) / aceStep) + 1);
     const currentMin = aceBaseCumulative + (aceLevel - 1) * aceStep;
     const currentMax = currentMin + aceStep;
+    const globalLevel = 18 + aceLevel;
     
-    return { name: 'Ace', level: aceLevel, min: currentMin, max: currentMax, icon: 'trophy', color: '#FF4500' };
+    return { name: 'Level', level: aceLevel, globalLevel, min: currentMin, max: currentMax, icon: 'trophy', color: '#FF4500' };
   };
 
   const currentRank = getRank(balance);
   const progressPercent = Math.min(100, Math.max(0, ((balance - currentRank.min) / (currentRank.max - currentRank.min)) * 100));
+  const tapValue = Math.pow(2, currentRank.globalLevel - 1);
+  const maxEnergy = currentRank.globalLevel * 2000;
+  const rankImageIndex = currentRank.globalLevel >= 19 ? 6 : Math.floor((currentRank.globalLevel - 1) / 3);
+  const characterImage = RANK_IMAGES[rankImageIndex];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setEnergy(prev => {
+        const newEnergy = prev + 3; // Regenerate 3 per second
+        return newEnergy > maxEnergy ? maxEnergy : newEnergy;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [maxEnergy]);
 
   const handleTap = (e) => {
-    // Increase balance
-    setBalance(prev => prev + 10);
+    if (energy < tapValue) return; // Prevent tapping if not enough energy
+
+    // Decrease energy and increase balance
+    setEnergy(prev => prev - tapValue);
+    setBalance(prev => prev + tapValue);
 
     const { locationX, locationY } = e.nativeEvent;
     const id = Date.now().toString() + Math.random().toString();
-    setClicks(prev => [...prev, { id, x: locationX, y: locationY }]);
+    setClicks(prev => [...prev, { id, x: locationX, y: locationY, val: tapValue }]);
 
     // Remove click after animation
     setTimeout(() => {
       setClicks(prev => prev.filter(c => c.id !== id));
     }, 1000);
 
-    // Bounce animation
-    Animated.sequence([
-      Animated.timing(scaleValue, {
-        toValue: 0.95,
-        duration: 50,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleValue, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      })
-    ]).start();
+    // No extra bounce needed here since handlePressIn/Out covers it
+  };
+
+  const handlePressIn = () => {
+    Animated.timing(scaleValue, {
+      toValue: 0.92,
+      duration: 50,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.timing(scaleValue, {
+      toValue: 1,
+      duration: 100,
+      useNativeDriver: true,
+    }).start();
   };
 
   const formatNumber = (num) => {
@@ -135,16 +234,10 @@ export default function App() {
           <View style={{ flex: 1 }}>
             {/* Header */}
             <View style={styles.header}>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons name="chevron-back" size={24} color="#FFF" />
-              </TouchableOpacity>
-              <View style={styles.titleContainer}>
+              <View style={[styles.titleContainer, { flex: 1 }]}>
                 <Text style={styles.title}>The Hedgehog</Text>
                 <View style={styles.titleUnderline} />
               </View>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons name="grid-outline" size={20} color="#FFF" />
-              </TouchableOpacity>
             </View>
 
             {/* Stats Row */}
@@ -153,12 +246,14 @@ export default function App() {
                 <Text style={styles.statLabel}>Earn per tap</Text>
                 <View style={styles.statValueRow}>
                   <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
-                  <Text style={styles.statValue}>+10</Text>
+                  <Text style={styles.statValue}>+{tapValue}</Text>
                 </View>
               </View>
               <View style={styles.statBox}>
                 <Text style={styles.statLabel}>Coin to levelup</Text>
-                <Text style={styles.statValueText}>100M</Text>
+                <Text style={styles.statValueText} adjustsFontSizeToFit numberOfLines={1}>
+                  {formatNumber(balance)} / {formatNumber(currentRank.max)}
+                </Text>
               </View>
               <View style={styles.statBox}>
                 <Text style={[styles.statLabel, {color: '#4ADE80'}]}>Profit per Hour</Text>
@@ -181,7 +276,7 @@ export default function App() {
             {/* Level & Progress */}
             <TouchableOpacity 
               style={styles.levelContainer}
-              onPress={() => setShowTapsLeft(!showTapsLeft)}
+              onPress={() => setShowRanksModal(true)}
               activeOpacity={0.8}
             >
               <View style={styles.levelHeader}>
@@ -190,10 +285,7 @@ export default function App() {
                   <Text style={styles.levelName}>{currentRank.name} {currentRank.level} {">"}</Text>
                 </View>
                 <Text style={styles.levelCount}>
-                  {showTapsLeft 
-                    ? `Need ${formatNumber(currentRank.max - balance)} taps`
-                    : `${formatNumber(balance)} / ${formatNumber(currentRank.max)}`
-                  }
+                  {formatNumber(balance)} / {formatNumber(currentRank.max)}
                 </Text>
               </View>
               <View style={styles.progressBarBackground}>
@@ -213,17 +305,26 @@ export default function App() {
                 <TouchableWithoutFeedback onPress={handleTap}>
                   <View style={{ width: '100%', height: '100%', borderRadius: width * 0.375, overflow: 'hidden' }}>
                     <Animated.Image 
-                      source={require('./assets/hedgehog.png')} 
+                      source={characterImage} 
                       style={[styles.characterImage, { transform: [{ scale: scaleValue }] }]} 
                       resizeMode="cover"
                     />
                     {clicks.map(c => (
-                      <FloatingClick key={c.id} x={c.x} y={c.y} />
+                      <FloatingClick key={c.id} x={c.x} y={c.y} val={c.val} />
                     ))}
                   </View>
                 </TouchableWithoutFeedback>
               </View>
             </View>
+
+            {/* Energy UI */}
+            <View style={styles.energyContainer}>
+              <FontAwesome5 name="bolt" size={24} color="#F59E0B" style={{ marginRight: 8 }} />
+              <Text style={styles.energyText}>
+                {formatNumber(energy)} / {formatNumber(maxEnergy)}
+              </Text>
+            </View>
+
           </View>
         ) : activeTab === 'Mine' ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -275,6 +376,44 @@ export default function App() {
             <Text style={activeTab === 'Airdrop' ? styles.navTextActive : styles.navText}>Airdrop</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Ranks Modal */}
+        <Modal
+          visible={showRanksModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowRanksModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>All Ranks</Text>
+                <TouchableOpacity onPress={() => setShowRanksModal(false)} style={styles.closeButton}>
+                  <Ionicons name="close" size={24} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.modalScroll}>
+                {ALL_RANKS.map((r, index) => {
+                  const isCurrent = currentRank.globalLevel === r.globalLevel || (currentRank.globalLevel >= 19 && r.isAce);
+                  return (
+                    <View key={index} style={[styles.rankListItem, isCurrent && styles.rankListItemCurrent]}>
+                      <View style={styles.rankListLeft}>
+                        <FontAwesome5 name={r.icon} size={20} color={r.color} style={{ width: 30 }} />
+                        <Text style={[styles.rankListName, isCurrent && styles.rankListNameCurrent]}>
+                          {r.name} {r.level}
+                        </Text>
+                      </View>
+                      <Text style={styles.rankListCost}>
+                        {r.isAce ? `${formatNumber(r.cost)}+ taps` : `${formatNumber(r.cost)} taps`}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
 
       </SafeAreaView>
     </LinearGradient>
@@ -345,7 +484,7 @@ const styles = StyleSheet.create({
   tinyCoin: {
     width: 16,
     height: 16,
-    marginRight: 4,
+    marginRight: 6,
   },
   statValue: {
     color: '#FFF',
@@ -471,5 +610,80 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#1E293B',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: height * 0.8,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  modalTitle: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalScroll: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  rankListItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  rankListItemCurrent: {
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    marginHorizontal: -10,
+    borderBottomWidth: 0,
+  },
+  rankListLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rankListName: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  rankListNameCurrent: {
+    color: '#8B5CF6',
+    fontWeight: 'bold',
+  },
+  rankListCost: {
+    color: '#94A3B8',
+    fontSize: 14,
+  },
+  energyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  energyText: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
 });
