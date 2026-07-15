@@ -1,5 +1,40 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, Dimensions, Platform, Animated, TouchableWithoutFeedback } from 'react-native';
+
+const FloatingClick = ({ x, y }) => {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: -100,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 800,
+        useNativeDriver: true,
+      })
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.Text style={{
+      position: 'absolute',
+      left: x - 15,
+      top: y - 15,
+      color: 'white',
+      fontSize: 30,
+      fontWeight: 'bold',
+      opacity: opacity,
+      transform: [{ translateY }]
+    }}>
+      +10
+    </Animated.Text>
+  );
+};
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
@@ -9,10 +44,64 @@ const { width } = Dimensions.get('window');
 export default function App() {
   const [balance, setBalance] = useState(20000000);
   const scaleValue = useRef(new Animated.Value(1)).current;
+  const [clicks, setClicks] = useState([]);
+  const [activeTab, setActiveTab] = useState('Exchange');
+  const [showTapsLeft, setShowTapsLeft] = useState(false);
 
-  const handleTap = () => {
+  const getRank = (bal) => {
+    const rankConfigs = [
+      { name: 'Bronze', icon: 'medal', color: '#CD7F32' },
+      { name: 'Silver', icon: 'medal', color: '#C0C0C0' },
+      { name: 'Gold', icon: 'medal', color: '#FFD700' },
+      { name: 'Platinum', icon: 'gem', color: '#E5E4E2' },
+      { name: 'Diamond', icon: 'gem', color: '#b9f2ff' },
+      { name: 'Crown', icon: 'crown', color: '#FFDF00' },
+    ];
+    
+    const getCumulativeCost = (L) => {
+      if (L <= 1) return 0;
+      return 3000 * (L - 1) + 1000 * (L - 1) * (L - 2);
+    };
+
+    let L = 1;
+    while (L <= 18) {
+      const currentLevelCost = getCumulativeCost(L);
+      const nextLevelCost = getCumulativeCost(L + 1);
+      
+      if (bal >= currentLevelCost && bal < nextLevelCost) {
+        const rankIndex = Math.floor((L - 1) / 3);
+        const subLevel = ((L - 1) % 3) + 1;
+        const config = rankConfigs[rankIndex];
+        return { name: config.name, level: subLevel, min: currentLevelCost, max: nextLevelCost, icon: config.icon, color: config.color };
+      }
+      L++;
+    }
+    
+    // Ace
+    const aceBaseCumulative = getCumulativeCost(19);
+    const aceStep = 100000000;
+    const aceLevel = Math.max(1, Math.floor((bal - aceBaseCumulative) / aceStep) + 1);
+    const currentMin = aceBaseCumulative + (aceLevel - 1) * aceStep;
+    const currentMax = currentMin + aceStep;
+    
+    return { name: 'Ace', level: aceLevel, min: currentMin, max: currentMax, icon: 'trophy', color: '#FF4500' };
+  };
+
+  const currentRank = getRank(balance);
+  const progressPercent = Math.min(100, Math.max(0, ((balance - currentRank.min) / (currentRank.max - currentRank.min)) * 100));
+
+  const handleTap = (e) => {
     // Increase balance
     setBalance(prev => prev + 10);
+
+    const { locationX, locationY } = e.nativeEvent;
+    const id = Date.now().toString() + Math.random().toString();
+    setClicks(prev => [...prev, { id, x: locationX, y: locationY }]);
+
+    // Remove click after animation
+    setTimeout(() => {
+      setClicks(prev => prev.filter(c => c.id !== id));
+    }, 1000);
 
     // Bounce animation
     Animated.sequence([
@@ -41,102 +130,149 @@ export default function App() {
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="light" />
         
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="chevron-back" size={24} color="#FFF" />
-          </TouchableOpacity>
-          <View style={styles.titleContainer}>
-            <Text style={styles.title}>The Hedgehog</Text>
-            <View style={styles.titleUnderline} />
-          </View>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="grid-outline" size={20} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Stats Row */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Earn per tap</Text>
-            <View style={styles.statValueRow}>
-              <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
-              <Text style={styles.statValue}>+10</Text>
+        {/* Main Content Area */}
+        {activeTab === 'Exchange' ? (
+          <View style={{ flex: 1 }}>
+            {/* Header */}
+            <View style={styles.header}>
+              <TouchableOpacity style={styles.iconButton}>
+                <Ionicons name="chevron-back" size={24} color="#FFF" />
+              </TouchableOpacity>
+              <View style={styles.titleContainer}>
+                <Text style={styles.title}>The Hedgehog</Text>
+                <View style={styles.titleUnderline} />
+              </View>
+              <TouchableOpacity style={styles.iconButton}>
+                <Ionicons name="grid-outline" size={20} color="#FFF" />
+              </TouchableOpacity>
             </View>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Coin to levelup</Text>
-            <Text style={styles.statValueText}>100M</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={[styles.statLabel, {color: '#4ADE80'}]}>Profit per Hour</Text>
-            <View style={styles.statValueRow}>
-              <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
-              <Text style={styles.statValue}>+100K</Text>
+
+            {/* Stats Row */}
+            <View style={styles.statsContainer}>
+              <View style={styles.statBox}>
+                <Text style={styles.statLabel}>Earn per tap</Text>
+                <View style={styles.statValueRow}>
+                  <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
+                  <Text style={styles.statValue}>+10</Text>
+                </View>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statLabel}>Coin to levelup</Text>
+                <Text style={styles.statValueText}>100M</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={[styles.statLabel, {color: '#4ADE80'}]}>Profit per Hour</Text>
+                <View style={styles.statValueRow}>
+                  <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
+                  <Text style={styles.statValue}>+100K</Text>
+                </View>
+              </View>
             </View>
-          </View>
-        </View>
 
-        {/* Balance */}
-        <View style={styles.balanceContainer}>
-          <Image 
-            source={require('./assets/coin.png')} 
-            style={styles.bigCoin} 
-          />
-          <Text style={styles.balanceText}>{formatNumber(balance)}</Text>
-        </View>
-
-        {/* Level & Progress */}
-        <View style={styles.levelContainer}>
-          <View style={styles.levelHeader}>
-            <Text style={styles.levelName}>Silver ></Text>
-            <Text style={styles.levelCount}>Level 8/10</Text>
-          </View>
-          <View style={styles.progressBarBackground}>
-            <LinearGradient
-              colors={['#FF6B6B', '#FFB86C']}
-              start={{x: 0, y: 0}}
-              end={{x: 1, y: 0}}
-              style={styles.progressBarFill}
-            />
-          </View>
-        </View>
-
-        {/* Character Area */}
-        <View style={styles.characterContainer}>
-          <View style={styles.glowCircle} />
-          <View style={styles.innerCircle}>
-            <TouchableWithoutFeedback onPress={handleTap}>
-              <Animated.Image 
-                source={require('./assets/hedgehog.png')} 
-                style={[styles.characterImage, { transform: [{ scale: scaleValue }] }]} 
-                resizeMode="contain"
+            {/* Balance */}
+            <View style={styles.balanceContainer}>
+              <Image 
+                source={require('./assets/coin.png')} 
+                style={styles.bigCoin} 
               />
-            </TouchableWithoutFeedback>
+              <Text style={styles.balanceText}>{formatNumber(balance)}</Text>
+            </View>
+
+            {/* Level & Progress */}
+            <TouchableOpacity 
+              style={styles.levelContainer}
+              onPress={() => setShowTapsLeft(!showTapsLeft)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.levelHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <FontAwesome5 name={currentRank.icon} size={14} color={currentRank.color} style={{ marginRight: 6 }} />
+                  <Text style={styles.levelName}>{currentRank.name} {currentRank.level} {">"}</Text>
+                </View>
+                <Text style={styles.levelCount}>
+                  {showTapsLeft 
+                    ? `Need ${formatNumber(currentRank.max - balance)} taps`
+                    : `${formatNumber(balance)} / ${formatNumber(currentRank.max)}`
+                  }
+                </Text>
+              </View>
+              <View style={styles.progressBarBackground}>
+                <LinearGradient
+                  colors={['#FF6B6B', '#FFB86C']}
+                  start={{x: 0, y: 0}}
+                  end={{x: 1, y: 0}}
+                  style={[styles.progressBarFill, { width: `${progressPercent}%` }]}
+                />
+              </View>
+            </TouchableOpacity>
+
+            {/* Character Area */}
+            <View style={styles.characterContainer}>
+              <View style={styles.glowCircle} />
+              <View style={styles.innerCircle}>
+                <TouchableWithoutFeedback onPress={handleTap}>
+                  <View style={{ width: '100%', height: '100%', borderRadius: width * 0.375, overflow: 'hidden' }}>
+                    <Animated.Image 
+                      source={require('./assets/hedgehog.png')} 
+                      style={[styles.characterImage, { transform: [{ scale: scaleValue }] }]} 
+                      resizeMode="cover"
+                    />
+                    {clicks.map(c => (
+                      <FloatingClick key={c.id} x={c.x} y={c.y} />
+                    ))}
+                  </View>
+                </TouchableWithoutFeedback>
+              </View>
+            </View>
           </View>
-        </View>
+        ) : activeTab === 'Mine' ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+             <MaterialCommunityIcons name="pickaxe" size={64} color="#FFB86C" />
+             <Text style={{ color: '#FFF', fontSize: 24, fontWeight: 'bold', marginTop: 20 }}>Mine (Upgrades)</Text>
+             <Text style={{ color: '#94A3B8', marginTop: 10 }}>Hamster Kombat Upgrades coming soon...</Text>
+          </View>
+        ) : (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+             <Text style={{ color: '#FFF', fontSize: 24, fontWeight: 'bold' }}>{activeTab}</Text>
+          </View>
+        )}
 
         {/* Bottom Navigation */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navItemActive}>
-            <Ionicons name="swap-horizontal" size={24} color="#FFF" />
-            <Text style={styles.navTextActive}>Exchange</Text>
+          <TouchableOpacity 
+            style={activeTab === 'Exchange' ? styles.navItemActive : styles.navItem}
+            onPress={() => setActiveTab('Exchange')}
+          >
+            <Ionicons name="swap-horizontal" size={24} color={activeTab === 'Exchange' ? "#FFF" : "#94A3B8"} />
+            <Text style={activeTab === 'Exchange' ? styles.navTextActive : styles.navText}>Exchange</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <MaterialCommunityIcons name="pickaxe" size={24} color="#94A3B8" />
-            <Text style={styles.navText}>Mine</Text>
+          <TouchableOpacity 
+            style={activeTab === 'Mine' ? styles.navItemActive : styles.navItem}
+            onPress={() => setActiveTab('Mine')}
+          >
+            <MaterialCommunityIcons name="pickaxe" size={24} color={activeTab === 'Mine' ? "#FFF" : "#94A3B8"} />
+            <Text style={activeTab === 'Mine' ? styles.navTextActive : styles.navText}>Mine</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <FontAwesome5 name="user-friends" size={20} color="#94A3B8" />
-            <Text style={styles.navText}>Friends</Text>
+          <TouchableOpacity 
+            style={activeTab === 'Friends' ? styles.navItemActive : styles.navItem}
+            onPress={() => setActiveTab('Friends')}
+          >
+            <FontAwesome5 name="user-friends" size={20} color={activeTab === 'Friends' ? "#FFF" : "#94A3B8"} />
+            <Text style={activeTab === 'Friends' ? styles.navTextActive : styles.navText}>Friends</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <FontAwesome5 name="coins" size={20} color="#94A3B8" />
-            <Text style={styles.navText}>Earn</Text>
+          <TouchableOpacity 
+            style={activeTab === 'Earn' ? styles.navItemActive : styles.navItem}
+            onPress={() => setActiveTab('Earn')}
+          >
+            <FontAwesome5 name="coins" size={20} color={activeTab === 'Earn' ? "#FFF" : "#94A3B8"} />
+            <Text style={activeTab === 'Earn' ? styles.navTextActive : styles.navText}>Earn</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
+          <TouchableOpacity 
+            style={activeTab === 'Airdrop' ? styles.navItemActive : styles.navItem}
+            onPress={() => setActiveTab('Airdrop')}
+          >
              <Image source={require('./assets/hedgehog.png')} style={styles.navTinyIcon} />
-            <Text style={styles.navText}>Airdrop</Text>
+            <Text style={activeTab === 'Airdrop' ? styles.navTextActive : styles.navText}>Airdrop</Text>
           </TouchableOpacity>
         </View>
 
@@ -290,10 +426,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   characterImage: {
     width: '100%',
     height: '100%',
+    borderRadius: width * 0.375,
   },
   bottomNav: {
     flexDirection: 'row',
