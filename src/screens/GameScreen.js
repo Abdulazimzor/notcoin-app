@@ -1,265 +1,295 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, Dimensions, Platform, Animated, TouchableWithoutFeedback, Modal, ScrollView } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, Dimensions, Platform, Animated, TouchableWithoutFeedback, ScrollView, Linking, Share } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const FloatingClick = ({ x, y, val }) => {
+const { width, height } = Dimensions.get('window');
+
+const FloatingText = ({ tap, onComplete }) => {
   const translateY = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(1)).current;
+  const scale = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(translateY, {
-        toValue: -150,
-        duration: 1000,
+        toValue: -250,
+        duration: 800,
         useNativeDriver: true,
       }),
       Animated.timing(opacity, {
         toValue: 0,
-        duration: 1000,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, {
+        toValue: 1.2,
+        friction: 3,
+        tension: 100,
         useNativeDriver: true,
       })
-    ]).start();
+    ]).start(() => onComplete(tap.id));
   }, []);
 
   return (
-    <Animated.Text style={{
-      position: 'absolute',
-      left: x - 15,
-      top: y - 15,
-      color: 'white',
-      fontSize: 30,
-      fontWeight: 'bold',
-      opacity: opacity,
-      transform: [{ translateY }]
-    }}>
-      +{val}
+    <Animated.Text
+      style={[
+        styles.floatingText,
+        {
+          left: tap.x - 30,
+          top: tap.y - 30,
+          opacity: opacity,
+          transform: [{ translateY }, { scale }]
+        }
+      ]}
+    >
+      {tap.value}
     </Animated.Text>
   );
 };
 
-const { width, height } = Dimensions.get('window');
-
-const rankConfigs = [
-  { name: 'Bronze', icon: 'medal', color: '#CD7F32' },
-  { name: 'Silver', icon: 'medal', color: '#C0C0C0' },
-  { name: 'Gold', icon: 'medal', color: '#FFD700' },
-  { name: 'Platinum', icon: 'gem', color: '#E5E4E2' },
-  { name: 'Diamond', icon: 'gem', color: '#b9f2ff' },
-  { name: 'Crown', icon: 'crown', color: '#FFDF00' },
-];
-
-const getCumulativeCost = (L) => {
-  if (L <= 1) return 0;
-  if (L === 2) return 1000;
-  if (L === 3) return 5000;
-  
-  let cost = 5000;
-  let currentGap = 4000;
-  
-  for (let i = 4; i <= L; i++) {
-    currentGap += 3625;
-    cost += currentGap;
-  }
-  return Math.round(cost / 100) * 100; // Round to nearest 100 for clean numbers
-};
-
-const ALL_RANKS = [];
-for (let L = 1; L <= 18; L++) {
-  const rankIndex = Math.floor((L - 1) / 3);
-  const subLevel = ((L - 1) % 3) + 1;
-  ALL_RANKS.push({
-    globalLevel: L,
-    name: rankConfigs[rankIndex].name,
-    level: subLevel,
-    icon: rankConfigs[rankIndex].icon,
-    color: rankConfigs[rankIndex].color,
-    cost: getCumulativeCost(L)
-  });
-}
-ALL_RANKS.push({
-  globalLevel: 19,
-  name: 'Ace',
-  level: '',
-  icon: 'trophy',
-  color: '#FF4500',
-  cost: getCumulativeCost(19),
-  isAce: true
-});
-
-const RANK_IMAGES = [
-  require('./assets/hamster_1.png'), // Bronze (levels 1-3)
-  require('./assets/hamster_2.png'), // Silver (levels 4-6)
-  require('./assets/hamster_3.png'), // Gold   (levels 7-9)
-  require('./assets/hamster_4.png'), // Platinum (levels 10-12)
-  require('./assets/hamster_5.png'), // Diamond (levels 13-15)
-  require('./assets/hamster_6.png'), // Crown  (levels 16-18)
-  require('./assets/hedgehog.png'),  // Ace    (level 19+)
-];
-
-import { supabase } from '../supabase';
-
-export default function GameScreen({ navigation }) {
-  const [balance, setBalance] = useState(1);
+export default function App() {
+  const [balance, setBalance] = useState(0);
+  const [totalTaps, setTotalTaps] = useState(0);
   const [energy, setEnergy] = useState(2000);
-  const scaleValue = useRef(new Animated.Value(1)).current;
-  const [clicks, setClicks] = useState([]);
-  const [activeTab, setActiveTab] = useState('Exchange');
-  const [showRanksModal, setShowRanksModal] = useState(false);
-  const [purchasedItems, setPurchasedItems] = useState([]);
-
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  const AVAILABLE_UPGRADES = [
-    { id: '1', name: 'Multitap', cost: 500, icon: 'hand-pointer', description: '+1 Tap Value' },
-    { id: '2', name: 'Energy Limit', cost: 1000, icon: 'battery-full', description: '+500 Max Energy' },
-    { id: '3', name: 'Recharging Speed', cost: 2000, icon: 'bolt', description: '+1 Energy/sec' },
-    { id: '4', name: 'Auto Bot', cost: 5000, icon: 'robot', description: 'Auto clicker' },
+  const [activeTab, setActiveTab] = useState('exchange');
+  const [maxEnergy, setMaxEnergy] = useState(2000);
+  const [tapIncrement, setTapIncrement] = useState(0);
+  const [profitPerHour, setProfitPerHour] = useState(0);
+  
+  const initialUpgrades = [
+    { id: '1', title: 'Fan tokens', category: 'Markets', baseProfit: 150, baseCost: 100, level: 0, icon: 'ticket-outline', effectType: 'profit' },
+    { id: '2', title: 'Margin trading x10', category: 'Markets', baseProfit: 300, baseCost: 500, level: 0, icon: 'bar-chart-outline', effectType: 'profit' },
+    { id: '3', title: 'KYC', category: 'Legal', baseProfit: 200, baseCost: 250, level: 0, icon: 'shield-checkmark-outline', effectType: 'profit' },
+    { id: '4', title: 'Marketing', category: 'PR&Team', baseProfit: 400, baseCost: 1000, level: 0, icon: 'megaphone-outline', effectType: 'profit' },
+    { id: '5', title: 'Energy Boost', category: 'Specials', baseProfit: 0, baseCost: 2000, level: 0, icon: 'battery-charging-outline', effectType: 'energy' },
+    { id: '6', title: 'Tap Boost', category: 'Specials', baseProfit: 0, baseCost: 1500, level: 0, icon: 'hand-pointer-outline', effectType: 'tap' },
   ];
+  const [upgrades, setUpgrades] = useState(initialUpgrades);
+  const [mineCategory, setMineCategory] = useState('Markets');
+  
+  const profitAccumulator = useRef(0);
+  const scaleValue = useRef(new Animated.Value(1)).current;
+  const [taps, setTaps] = useState([]);
+  const [completedTasks, setCompletedTasks] = useState([]);
 
-  const latestData = useRef({ balance: 1, energy: 2000 });
-
+  // Load data when the app starts
   useEffect(() => {
     const loadData = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          // Fetch from Supabase profiles and inventory
-          const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-          if (profile) {
-            if (profile.balance !== null) setBalance(Number(profile.balance));
-            if (profile.energy !== null) setEnergy(Number(profile.energy));
-          }
-          const { data: inventory } = await supabase.from('inventory').select('*').eq('user_id', user.id);
-          if (inventory) {
-            setPurchasedItems(inventory.map(item => ({ ...item, purchaseId: item.id })));
-          }
-        } else {
-          // Local fallback
-          const savedBalance = await SecureStore.getItemAsync('balance');
-          const savedEnergy = await SecureStore.getItemAsync('energy');
-          if (savedBalance !== null) setBalance(parseInt(savedBalance, 10));
-          if (savedEnergy !== null) setEnergy(parseInt(savedEnergy, 10));
-          const savedItems = await SecureStore.getItemAsync('purchasedItems');
-          if (savedItems !== null) setPurchasedItems(JSON.parse(savedItems));
+        const savedBalance = await AsyncStorage.getItem('notcoin_balance');
+        const savedTaps = await AsyncStorage.getItem('notcoin_taps');
+        const savedEnergy = await AsyncStorage.getItem('notcoin_energy');
+        const savedProfit = await AsyncStorage.getItem('notcoin_profit');
+        const savedUpgrades = await AsyncStorage.getItem('notcoin_upgrades');
+        const savedTasks = await AsyncStorage.getItem('notcoin_tasks');
+        
+        if (savedBalance !== null) setBalance(parseInt(savedBalance, 10));
+        if (savedTaps !== null) setTotalTaps(parseInt(savedTaps, 10));
+        if (savedEnergy !== null) setEnergy(parseInt(savedEnergy, 10));
+        if (savedProfit !== null) setProfitPerHour(parseInt(savedProfit, 10));
+        if (savedUpgrades !== null) {
+          const parsed = JSON.parse(savedUpgrades);
+          const updated = parsed.map(u => {
+            const init = initialUpgrades.find(i => i.id === u.id);
+            return init ? { ...u, baseCost: init.baseCost } : u;
+          });
+          setUpgrades(updated);
         }
+        if (savedTasks !== null) setCompletedTasks(JSON.parse(savedTasks));
       } catch (e) {
-        console.error(e);
-      } finally {
-        setIsLoaded(true);
+        console.log('Error loading data', e);
       }
     };
     loadData();
   }, []);
 
+  // Save data whenever it changes
   useEffect(() => {
-    latestData.current = { balance, energy };
-    if (!isLoaded) return;
-    const saveDataLocal = async () => {
+    const saveData = async () => {
       try {
-        await SecureStore.setItemAsync('balance', balance.toString());
-        await SecureStore.setItemAsync('energy', energy.toString());
-        await SecureStore.setItemAsync('purchasedItems', JSON.stringify(purchasedItems));
-      } catch (e) { }
-    };
-    saveDataLocal();
-  }, [balance, energy, purchasedItems, isLoaded]);
-
-  useEffect(() => {
-    const syncInterval = setInterval(async () => {
-      if (!isLoaded) return;
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session && session.user) {
-          await supabase.from('profiles').update({
-            balance: latestData.current.balance,
-            energy: latestData.current.energy
-          }).eq('id', session.user.id);
-        }
-      } catch (e) { }
-    }, 5000);
-    return () => clearInterval(syncInterval);
-  }, [isLoaded]);
-
-  const getRank = (bal) => {
-
-    let L = 1;
-    while (L <= 18) {
-      const currentLevelCost = getCumulativeCost(L);
-      const nextLevelCost = getCumulativeCost(L + 1);
-      
-      if (bal >= currentLevelCost && bal < nextLevelCost) {
-        const rankIndex = Math.floor((L - 1) / 3);
-        const subLevel = ((L - 1) % 3) + 1;
-        const config = rankConfigs[rankIndex];
-        return { name: config.name, level: subLevel, globalLevel: L, min: currentLevelCost, max: nextLevelCost, icon: config.icon, color: config.color };
+        await AsyncStorage.setItem('notcoin_balance', balance.toString());
+        await AsyncStorage.setItem('notcoin_taps', totalTaps.toString());
+        await AsyncStorage.setItem('notcoin_energy', energy.toString());
+        await AsyncStorage.setItem('notcoin_profit', profitPerHour.toString());
+        await AsyncStorage.setItem('notcoin_upgrades', JSON.stringify(upgrades));
+        await AsyncStorage.setItem('notcoin_tasks', JSON.stringify(completedTasks));
+      } catch (e) {
+        console.log('Error saving data', e);
       }
-      L++;
-    }
-    
-    // Ace
-    const aceBaseCumulative = getCumulativeCost(19);
-    const aceStep = 100000000;
-    const aceLevel = Math.max(1, Math.floor((bal - aceBaseCumulative) / aceStep) + 1);
-    const currentMin = aceBaseCumulative + (aceLevel - 1) * aceStep;
-    const currentMax = currentMin + aceStep;
-    const globalLevel = 18 + aceLevel;
-    
-    return { name: 'Level', level: aceLevel, globalLevel, min: currentMin, max: currentMax, icon: 'trophy', color: '#FF4500' };
-  };
+    };
+    saveData();
+  }, [balance, totalTaps, energy, profitPerHour, upgrades]);
 
-  const currentRank = getRank(balance);
-  const progressPercent = Math.min(100, Math.max(0, ((balance - currentRank.min) / (currentRank.max - currentRank.min)) * 100));
-  const tapValue = Math.pow(2, currentRank.globalLevel - 1);
-  const maxEnergy = currentRank.globalLevel * 2000;
-  const rankImageIndex = currentRank.globalLevel >= 19 ? 6 : Math.floor((currentRank.globalLevel - 1) / 3);
-  const characterImage = RANK_IMAGES[rankImageIndex];
+  // Profit generation interval
+  useEffect(() => {
+    if (profitPerHour <= 0) return;
+    const interval = setInterval(() => {
+      profitAccumulator.current += profitPerHour / 3600;
+      if (profitAccumulator.current >= 1) {
+        const intPart = Math.floor(profitAccumulator.current);
+        profitAccumulator.current -= intPart;
+        setBalance(prev => prev + intPart);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [profitPerHour]);
 
+  // Energy regeneration using maxEnergy
   useEffect(() => {
     const interval = setInterval(() => {
       setEnergy(prev => {
-        const newEnergy = prev + 3; // Regenerate 3 per second
-        return newEnergy > maxEnergy ? maxEnergy : newEnergy;
+        if (prev < maxEnergy) {
+          return Math.min(prev + 3, maxEnergy);
+        }
+        return prev;
       });
     }, 1000);
     return () => clearInterval(interval);
   }, [maxEnergy]);
 
+  const RANK_THRESHOLDS = [
+    0,        // 0
+    0,        // 1 Bronze 1
+    2000,     // 2 Bronze 2
+    5000,     // 3 Bronze 3
+    10000,    // 4 Silver 1
+    25000,    // 5 Silver 2
+    50000,    // 6 Silver 3
+    100000,   // 7 Gold 1
+    250000,   // 8 Gold 2
+    500000,   // 9 Gold 3
+    1000000,  // 10 Platinum 1
+    2500000,  // 11 Platinum 2
+    5000000,  // 12 Platinum 3
+    10000000, // 13 Diamond 1
+    20000000, // 14 Diamond 2
+    30000000, // 15 Diamond 3
+    50000000, // 16 Crown 1
+    70000000, // 17 Crown 2
+    85000000, // 18 Crown 3
+    100000000 // 19 Ace
+  ];
+
+  const getRequiredTaps = (lvl) => {
+    if (lvl <= 1) return 0;
+    let required = 0;
+    let gap = 1000;
+    for (let i = 2; i <= lvl; i++) {
+      required += gap;
+      gap *= 2;
+    }
+    return required;
+  };
+
+  const getLevelFromTaps = (taps) => {
+    let lvl = 1;
+    while (taps >= getRequiredTaps(lvl + 1)) {
+      lvl++;
+    }
+    return lvl;
+  };
+
+  const level = getLevelFromTaps(totalTaps);
+  const nextLevelTaps = getRequiredTaps(level + 1);
+  const currentLevelTaps = getRequiredTaps(level);
+  const progressPercent = ((totalTaps - currentLevelTaps) / (nextLevelTaps - currentLevelTaps)) * 100;
+
+  const tapValue = Math.pow(2, level - 1);
+
+  const getRankName = (lvl) => {
+    const roman = (n) => {
+      const map = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X'};
+      return map[n] || n;
+    };
+    if (lvl <= 3) return `Bronze ${roman(lvl)}`;
+    if (lvl <= 6) return `Silver ${roman(lvl - 3)}`;
+    if (lvl <= 9) return `Gold ${roman(lvl - 6)}`;
+    if (lvl <= 12) return `Platinum ${roman(lvl - 9)}`;
+    if (lvl <= 15) return `Diamond ${roman(lvl - 12)}`;
+    if (lvl <= 18) return `Crown ${roman(lvl - 15)}`;
+    if (lvl === 19) return `Ace`;
+    return `Level ${lvl - 19}`;
+  };
+
+  const getRankIcon = (lvl) => {
+    if (lvl <= 3) return { name: 'medal', color: '#CD7F32' };
+    if (lvl <= 6) return { name: 'medal', color: '#C0C0C0' };
+    if (lvl <= 9) return { name: 'medal', color: '#FFD700' };
+    if (lvl <= 12) return { name: 'diamond', color: '#E5E4E2' };
+    if (lvl <= 15) return { name: 'diamond', color: '#B9F2FF' };
+    if (lvl <= 18) return { name: 'star', color: '#FFB86C' };
+    if (lvl === 19) return { name: 'trophy', color: '#FF4500' };
+    return { name: 'star-outline', color: '#FFF' };
+  };
+
   const handleTap = (e) => {
-    if (energy < tapValue) return; // Prevent tapping if not enough energy
+    const currentTapValue = tapValue + tapIncrement;
+    if (energy < currentTapValue) return;
 
-    // Decrease energy and increase balance
-    setEnergy(prev => prev - tapValue);
-    setBalance(prev => prev + tapValue);
+    setEnergy(prev => prev - currentTapValue);
+    setTotalTaps(prev => prev + currentTapValue);
+    
+    // Add floating text
+    const newTap = {
+      id: Date.now().toString() + Math.random().toString(),
+      x: e.nativeEvent.locationX,
+      y: e.nativeEvent.locationY,
+      value: `+${currentTapValue}`,
+    };
+    setTaps(prev => [...prev, newTap]);
 
-    const { locationX, locationY } = e.nativeEvent;
-    const id = Date.now().toString() + Math.random().toString();
-    setClicks(prev => [...prev, { id, x: locationX, y: locationY, val: tapValue }]);
+    // Increase balance
+    setBalance(prev => prev + currentTapValue);
 
-    // Remove click after animation
-    setTimeout(() => {
-      setClicks(prev => prev.filter(c => c.id !== id));
-    }, 1000);
-
-    // No extra bounce needed here since handlePressIn/Out covers it
+    // Bounce animation
+    Animated.sequence([
+      Animated.timing(scaleValue, {
+        toValue: 0.92,
+        duration: 50,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleValue, {
+        toValue: 1,
+        duration: 120,
+        useNativeDriver: true,
+      })
+    ]).start();
   };
 
-  const handlePressIn = () => {
-    Animated.timing(scaleValue, {
-      toValue: 0.92,
-      duration: 50,
-      useNativeDriver: true,
-    }).start();
+  const handleCheat = () => {
+    // Secret button to test 1 million jumps
+    setBalance(prev => prev + 1000000);
   };
 
-  const handlePressOut = () => {
-    Animated.timing(scaleValue, {
-      toValue: 1,
-      duration: 100,
-      useNativeDriver: true,
-    }).start();
+  const handleBuyUpgrade = (item) => {
+    const currentCost = item.level === 0 ? item.baseCost : Math.floor(item.baseCost * Math.pow(1.5, item.level));
+    if (balance >= currentCost) {
+      setBalance(prev => prev - currentCost);
+
+      if (item.effectType === 'profit') {
+        const profitIncrease = item.level === 0 ? item.baseProfit : Math.floor(item.baseProfit * 1.2);
+        setProfitPerHour(prev => prev + profitIncrease);
+      } else if (item.effectType === 'energy') {
+        // Increase maxEnergy by 500 per level
+        setMaxEnergy(prev => prev + 500);
+      } else if (item.effectType === 'tap') {
+        // Determine increment based on current level
+        const lvl = item.level;
+        let add = 0;
+        if (lvl === 0) add = 1;
+        else if (lvl === 1) add = 2;
+        else if (lvl === 2) add = 4;
+        else if (lvl === 3) add = 6;
+        else add = 2;
+        setTapIncrement(prev => prev + add);
+      }
+
+      // Increase upgrade level
+      setUpgrades(prev => prev.map(u => u.id === item.id ? { ...u, level: u.level + 1 } : u));
+    }
   };
 
   const formatNumber = (num) => {
@@ -274,65 +304,62 @@ export default function GameScreen({ navigation }) {
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="light" />
         
-        {/* Main Content Area */}
-        {activeTab === 'Exchange' ? (
-          <View style={{ flex: 1 }}>
-            {/* Header */}
-            <View style={styles.header}>
-              <View style={[styles.titleContainer, { flex: 1 }]}>
-                <Text style={styles.title}>The Hedgehog</Text>
-                <View style={styles.titleUnderline} />
-              </View>
-            </View>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.iconButton}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.titleContainer} onPress={handleCheat}>
+            <Text style={styles.title}>The Hedgehog</Text>
+            <View style={styles.titleUnderline} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}>
+            <Ionicons name="grid-outline" size={20} color="#FFF" />
+          </TouchableOpacity>
+        </View>
 
-            {/* Stats Row */}
-            <View style={styles.statsContainer}>
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Earn per tap</Text>
-                <View style={styles.statValueRow}>
-                  <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
-                  <Text style={styles.statValue}>+{tapValue}</Text>
-                </View>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Coin to levelup</Text>
-                <Text style={styles.statValueText} adjustsFontSizeToFit numberOfLines={1}>
-                  {formatNumber(balance)} / {formatNumber(currentRank.max)}
-                </Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={[styles.statLabel, {color: '#4ADE80'}]}>Profit per Hour</Text>
-                <View style={styles.statValueRow}>
-                  <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
-                  <Text style={styles.statValue}>+100K</Text>
-                </View>
-              </View>
+        {/* Stats Row */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statBox}>
+            <Text style={styles.statLabel}>Earn per tap</Text>
+            <View style={styles.statValueRow}>
+              <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
+              <Text style={styles.statValue}>+{formatNumber(tapValue + tapIncrement)}</Text>
             </View>
-
-            {/* Balance */}
-            <View style={styles.balanceContainer}>
-              <Image 
-                source={require('./assets/coin.png')} 
-                style={styles.bigCoin} 
-              />
-              <Text style={styles.balanceText}>{formatNumber(balance)}</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statLabel}>Next Level</Text>
+            <Text style={styles.statValueText}>{formatNumber(totalTaps)} / {formatNumber(nextLevelTaps)}</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={[styles.statLabel, {color: '#4ADE80'}]}>Profit per Hour</Text>
+            <View style={styles.statValueRow}>
+              <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
+              <Text style={styles.statValue}>+{formatNumber(profitPerHour)}</Text>
             </View>
+          </View>
+        </View>
 
+        {/* Balance */}
+        <View style={styles.balanceContainer}>
+          <Image 
+            source={require('./assets/coin.png')} 
+            style={styles.bigCoin} 
+          />
+          <Text style={styles.balanceText}>{formatNumber(balance)}</Text>
+        </View>
+
+        {activeTab === 'exchange' ? (
+          <>
             {/* Level & Progress */}
-            <TouchableOpacity 
-              style={styles.levelContainer}
-              onPress={() => setShowRanksModal(true)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.levelHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <FontAwesome5 name={currentRank.icon} size={14} color={currentRank.color} style={{ marginRight: 6 }} />
-                  <Text style={styles.levelName}>{currentRank.name} {currentRank.level} {">"}</Text>
+            <View style={styles.levelContainer}>
+              <TouchableOpacity style={styles.levelHeader} onPress={() => setActiveTab('ranks')}>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <Ionicons name={getRankIcon(level).name} size={16} color={getRankIcon(level).color} style={{marginRight: 6}} />
+                  <Text style={styles.levelName}>{getRankName(level)} {'>'}</Text>
                 </View>
-                <Text style={styles.levelCount}>
-                  {formatNumber(balance)} / {formatNumber(currentRank.max)}
-                </Text>
-              </View>
+                <Text style={styles.levelCount}>{formatNumber(totalTaps)} / {formatNumber(nextLevelTaps)}</Text>
+              </TouchableOpacity>
               <View style={styles.progressBarBackground}>
                 <LinearGradient
                   colors={['#FF6B6B', '#FFB86C']}
@@ -341,195 +368,205 @@ export default function GameScreen({ navigation }) {
                   style={[styles.progressBarFill, { width: `${progressPercent}%` }]}
                 />
               </View>
-            </TouchableOpacity>
+            </View>
 
             {/* Character Area */}
             <View style={styles.characterContainer}>
               <View style={styles.glowCircle} />
               <View style={styles.innerCircle}>
                 <TouchableWithoutFeedback onPress={handleTap}>
-                  <View style={{ width: '100%', height: '100%', borderRadius: width * 0.375, overflow: 'hidden' }}>
-                    <Animated.Image 
-                      source={characterImage} 
-                      style={[styles.characterImage, { transform: [{ scale: scaleValue }] }]} 
+                  <Animated.View style={[styles.characterImageWrapper, { transform: [{ scale: scaleValue }] }]}>
+                    <Image 
+                      source={require('./assets/hedgehog.png')} 
+                      style={styles.characterImage} 
                       resizeMode="cover"
                     />
-                    {clicks.map(c => (
-                      <FloatingClick key={c.id} x={c.x} y={c.y} val={c.val} />
+                    {taps.map(tap => (
+                      <FloatingText 
+                        key={tap.id} 
+                        tap={tap} 
+                        onComplete={(id) => {
+                          setTaps(prev => prev.filter(t => t.id !== id));
+                        }} 
+                      />
                     ))}
-                  </View>
+                  </Animated.View>
                 </TouchableWithoutFeedback>
               </View>
             </View>
 
-            {/* Energy UI */}
+            {/* Energy Container (Bottom) */}
             <View style={styles.energyContainer}>
-              <FontAwesome5 name="bolt" size={24} color="#F59E0B" style={{ marginRight: 8 }} />
-              <Text style={styles.energyText}>
-                {formatNumber(energy)} / {formatNumber(maxEnergy)}
-              </Text>
+              <Ionicons name="flash" size={24} color="#F59E0B" style={{marginRight: 8}} />
+              <Text style={styles.energyText}>{energy} / {maxEnergy}</Text>
             </View>
-
-          </View>
-        ) : activeTab === 'Mine' ? (
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: '#FFF', fontSize: 24, fontWeight: 'bold', margin: 20 }}>Upgrades Store</Text>
-            <ScrollView style={{ paddingHorizontal: 20 }}>
-              {AVAILABLE_UPGRADES.map(item => (
-                <View key={item.id} style={styles.upgradeItem}>
-                  <View style={styles.upgradeIconBox}>
-                    <FontAwesome5 name={item.icon} size={24} color="#FFF" />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 15 }}>
-                    <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>{item.name}</Text>
-                    <Text style={{ color: '#94A3B8', fontSize: 12 }}>{item.description}</Text>
-                  </View>
-                  <TouchableOpacity 
-                    style={[styles.buyButton, balance < item.cost && { opacity: 0.5 }]}
-                    onPress={async () => {
-                      if (balance >= item.cost) {
-                        setBalance(prev => prev - item.cost);
-                        const newItem = { ...item, purchaseId: Date.now().toString() };
-                        setPurchasedItems(prev => [...prev, newItem]);
-                        
-                        try {
-                          const { data: { session } } = await supabase.auth.getSession();
-                          if (session && session.user) {
-                            await supabase.from('inventory').insert([{
-                              user_id: session.user.id,
-                              item_id: item.id,
-                              name: item.name,
-                              cost: item.cost,
-                              icon: item.icon
-                            }]);
-                          }
-                        } catch (e) {
-                          console.error('Purchase error', e);
-                        }
-                      }
-                    }}
-                    disabled={balance < item.cost}
-                  >
-                    <Text style={{ color: '#FFF', fontWeight: 'bold' }}>{item.cost}</Text>
-                    <Image source={require('./assets/coin.png')} style={{ width: 14, height: 14, marginLeft: 4 }} />
-                  </TouchableOpacity>
-                </View>
+          </>
+        ) : activeTab === 'mine' ? (
+          <View style={styles.mineContainer}>
+            {/* Categories */}
+            <View style={styles.mineTabs}>
+              {['Markets', 'PR&Team', 'Legal', 'Specials'].map(cat => (
+                <TouchableOpacity 
+                  key={cat} 
+                  style={[styles.mineTab, mineCategory === cat && styles.mineTabActive]}
+                  onPress={() => setMineCategory(cat)}
+                >
+                  <Text style={[styles.mineTabText, mineCategory === cat && styles.mineTabTextActive]}>{cat}</Text>
+                </TouchableOpacity>
               ))}
+            </View>
+            
+            {/* Cards */}
+            <ScrollView style={styles.cardsScroll} contentContainerStyle={styles.cardsGrid}>
+              {upgrades.filter(u => u.category === mineCategory || mineCategory === 'Specials').map(item => {
+                const currentCost = item.level === 0 ? item.baseCost : Math.floor(item.baseCost * Math.pow(1.5, item.level));
+                const profitIncrease = item.level === 0 ? item.baseProfit : Math.floor(item.baseProfit * 1.2);
+                const canAfford = balance >= currentCost;
+                
+                return (
+                  <TouchableOpacity 
+                    key={item.id} 
+                    style={[styles.upgradeCard, !canAfford && {opacity: 0.7}]} 
+                    onPress={() => handleBuyUpgrade(item)}
+                  >
+                    <View style={styles.upgradeHeader}>
+                      <Ionicons name={item.icon} size={30} color="#FFB86C" />
+                      <View style={styles.upgradeTitleBox}>
+                        <Text style={styles.upgradeTitle}>{item.title}</Text>
+                        <Text style={styles.upgradeProfitLabel}>Profit per hour</Text>
+                        <Text style={styles.upgradeProfitValue}>+{formatNumber(profitIncrease)}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.upgradeFooter}>
+                      <Text style={styles.upgradeLevel}>lvl {item.level}</Text>
+                      <View style={styles.upgradeCostBox}>
+                        <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
+                        <Text style={[styles.upgradeCost, !canAfford && {color: '#EF4444'}]}>
+                          {formatNumber(currentCost)}
+                        </Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
-        ) : activeTab === 'Main' ? (
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: '#FFF', fontSize: 24, fontWeight: 'bold', margin: 20 }}>My Inventory (Main)</Text>
-            {purchasedItems.length === 0 ? (
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <FontAwesome5 name="box-open" size={64} color="#94A3B8" />
-                <Text style={{ color: '#94A3B8', marginTop: 20 }}>You haven't bought anything yet.</Text>
-              </View>
-            ) : (
-              <ScrollView style={{ paddingHorizontal: 20 }}>
-                {purchasedItems.map(item => (
-                  <View key={item.purchaseId} style={styles.upgradeItem}>
-                    <View style={styles.upgradeIconBox}>
-                      <FontAwesome5 name={item.icon} size={24} color="#FFF" />
+        ) : activeTab === 'ranks' ? (
+          <View style={styles.ranksContainer}>
+            <View style={styles.ranksHeader}>
+              <TouchableOpacity onPress={() => setActiveTab('exchange')} style={styles.backButton}>
+                <Ionicons name="chevron-back" size={24} color="#FFF" />
+                <Text style={styles.backText}>Back</Text>
+              </TouchableOpacity>
+              <Text style={styles.ranksTitle}>All Ranks</Text>
+            </View>
+            <ScrollView style={styles.ranksScroll}>
+              {[...Array(30)].map((_, i) => {
+                const lvl = i + 1;
+                const rankName = getRankName(lvl);
+                const reqTaps = getRequiredTaps(lvl);
+                const isCurrent = level === lvl;
+                const icon = getRankIcon(lvl);
+                
+                return (
+                  <View key={lvl} style={[styles.rankItem, isCurrent && styles.rankItemActive]}>
+                    <View style={styles.rankInfo}>
+                      <Ionicons name={icon.name} size={20} color={icon.color} style={{marginRight: 10}} />
+                      <Text style={[styles.rankName, isCurrent && {color: '#FFB86C'}]}>{rankName}</Text>
+                      {isCurrent && <Text style={styles.rankCurrentBadge}>Current</Text>}
                     </View>
-                    <View style={{ flex: 1, marginLeft: 15 }}>
-                      <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>{item.name}</Text>
-                      <Text style={{ color: '#4ADE80', fontSize: 12 }}>Purchased</Text>
-                    </View>
+                    <Text style={styles.rankTaps}>{formatNumber(reqTaps)} Taps</Text>
                   </View>
-                ))}
-              </ScrollView>
-            )}
+                );
+              })}
+            </ScrollView>
           </View>
-        ) : (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-             <Text style={{ color: '#FFF', fontSize: 24, fontWeight: 'bold' }}>{activeTab}</Text>
+        ) : activeTab === 'friends' ? (
+          <View style={styles.simpleTabContainer}>
+            <FontAwesome5 name="user-friends" size={60} color="#FFB86C" style={styles.simpleTabIcon} />
+            <Text style={styles.simpleTabTitle}>Invite Friends</Text>
+            <Text style={styles.simpleTabDesc}>Invite your friends and get 100,000 coins for both of you!</Text>
+            <TouchableOpacity 
+              style={styles.simpleTabButton}
+              onPress={async () => {
+                try {
+                  const result = await Share.share({
+                    message: 'Join me in this awesome game and let\'s earn together! https://t.me/my_bot',
+                  });
+                  if (result.action === Share.sharedAction) {
+                    setBalance(prev => prev + 100000);
+                  }
+                } catch (error) {
+                  console.log(error);
+                }
+              }}
+            >
+              <Text style={styles.simpleTabButtonText}>Invite a Friend</Text>
+            </TouchableOpacity>
           </View>
-        )}
+        ) : activeTab === 'earn' ? (
+          <View style={styles.earnContainer}>
+            <Text style={styles.earnTitle}>Earn More Coins</Text>
+            <ScrollView style={styles.taskList}>
+              {[
+                { id: 'yt', title: 'Subscribe to YouTube', reward: 50000, url: 'https://youtube.com', icon: 'youtube', color: '#FF0000' },
+                { id: 'tg', title: 'Join Telegram Channel', reward: 50000, url: 'https://telegram.org', icon: 'telegram', color: '#0088cc' },
+                { id: 'ig', title: 'Follow on Instagram', reward: 50000, url: 'https://instagram.com', icon: 'instagram', color: '#E1306C' },
+                { id: 'tw', title: 'Follow on Twitch', reward: 50000, url: 'https://twitch.tv', icon: 'twitch', color: '#6441a5' },
+              ].map(task => {
+                const isCompleted = completedTasks.includes(task.id);
+                return (
+                  <TouchableOpacity 
+                    key={task.id}
+                    style={[styles.taskCard, isCompleted && {opacity: 0.8}]}
+                    onPress={() => {
+                      if (isCompleted) {
+                        setBalance(prev => prev - task.reward);
+                        setCompletedTasks(prev => prev.filter(id => id !== task.id));
+                      } else {
+                        Linking.openURL(task.url);
+                        setBalance(prev => prev + task.reward);
+                        setCompletedTasks(prev => [...prev, task.id]);
+                      }
+                    }}
+                  >
+                    <FontAwesome5 name={task.icon} size={30} color={task.color} style={styles.taskIcon} />
+                    <View style={styles.taskInfo}>
+                      <Text style={styles.taskTitle}>{task.title}</Text>
+                      <Text style={styles.taskReward}>+{formatNumber(task.reward)} coins</Text>
+                    </View>
+                    {isCompleted ? (
+                      <Ionicons name="checkmark-circle" size={24} color="#4ADE80" />
+                    ) : (
+                      <Ionicons name="chevron-forward" size={24} color="#94A3B8" />
+                    )}
+                  </TouchableOpacity>
+                )
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
 
         {/* Bottom Navigation */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity 
-            style={activeTab === 'Exchange' ? styles.navItemActive : styles.navItem}
-            onPress={() => setActiveTab('Exchange')}
-          >
-            <Ionicons name="swap-horizontal" size={24} color={activeTab === 'Exchange' ? "#FFF" : "#94A3B8"} />
-            <Text style={activeTab === 'Exchange' ? styles.navTextActive : styles.navText}>Exchange</Text>
+          <TouchableOpacity style={activeTab === 'exchange' ? styles.navItemActive : styles.navItem} onPress={() => setActiveTab('exchange')}>
+            <Ionicons name="swap-horizontal" size={24} color={activeTab === 'exchange' ? '#FFF' : '#94A3B8'} />
+            <Text style={activeTab === 'exchange' ? styles.navTextActive : styles.navText}>Exchange</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={activeTab === 'Mine' ? styles.navItemActive : styles.navItem}
-            onPress={() => setActiveTab('Mine')}
-          >
-            <MaterialCommunityIcons name="pickaxe" size={24} color={activeTab === 'Mine' ? "#FFF" : "#94A3B8"} />
-            <Text style={activeTab === 'Mine' ? styles.navTextActive : styles.navText}>Mine</Text>
+          <TouchableOpacity style={activeTab === 'mine' ? styles.navItemActive : styles.navItem} onPress={() => setActiveTab('mine')}>
+            <MaterialCommunityIcons name="pickaxe" size={24} color={activeTab === 'mine' ? '#FFF' : '#94A3B8'} />
+            <Text style={activeTab === 'mine' ? styles.navTextActive : styles.navText}>Mine</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={activeTab === 'Main' ? styles.navItemActive : styles.navItem}
-            onPress={() => setActiveTab('Main')}
-          >
-            <Ionicons name="home" size={20} color={activeTab === 'Main' ? "#FFF" : "#94A3B8"} />
-            <Text style={activeTab === 'Main' ? styles.navTextActive : styles.navText}>Main</Text>
+          <TouchableOpacity style={activeTab === 'friends' ? styles.navItemActive : styles.navItem} onPress={() => setActiveTab('friends')}>
+            <FontAwesome5 name="user-friends" size={20} color={activeTab === 'friends' ? '#FFF' : '#94A3B8'} />
+            <Text style={activeTab === 'friends' ? styles.navTextActive : styles.navText}>Friends</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={activeTab === 'Friends' ? styles.navItemActive : styles.navItem}
-            onPress={() => setActiveTab('Friends')}
-          >
-            <FontAwesome5 name="user-friends" size={20} color={activeTab === 'Friends' ? "#FFF" : "#94A3B8"} />
-            <Text style={activeTab === 'Friends' ? styles.navTextActive : styles.navText}>Friends</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={activeTab === 'Earn' ? styles.navItemActive : styles.navItem}
-            onPress={() => setActiveTab('Earn')}
-          >
-            <FontAwesome5 name="coins" size={20} color={activeTab === 'Earn' ? "#FFF" : "#94A3B8"} />
-            <Text style={activeTab === 'Earn' ? styles.navTextActive : styles.navText}>Earn</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={activeTab === 'Airdrop' ? styles.navItemActive : styles.navItem}
-            onPress={() => setActiveTab('Airdrop')}
-          >
-             <Image source={require('./assets/hedgehog.png')} style={styles.navTinyIcon} />
-            <Text style={activeTab === 'Airdrop' ? styles.navTextActive : styles.navText}>Airdrop</Text>
+          <TouchableOpacity style={activeTab === 'earn' ? styles.navItemActive : styles.navItem} onPress={() => setActiveTab('earn')}>
+            <FontAwesome5 name="coins" size={20} color={activeTab === 'earn' ? '#FFF' : '#94A3B8'} />
+            <Text style={activeTab === 'earn' ? styles.navTextActive : styles.navText}>Earn</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Ranks Modal */}
-        <Modal
-          visible={showRanksModal}
-          transparent={true}
-          animationType="slide"
-          onRequestClose={() => setShowRanksModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>All Ranks</Text>
-                <TouchableOpacity onPress={() => setShowRanksModal(false)} style={styles.closeButton}>
-                  <Ionicons name="close" size={24} color="#FFF" />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalScroll}>
-                {ALL_RANKS.map((r, index) => {
-                  const isCurrent = currentRank.globalLevel === r.globalLevel || (currentRank.globalLevel >= 19 && r.isAce);
-                  return (
-                    <View key={index} style={[styles.rankListItem, isCurrent && styles.rankListItemCurrent]}>
-                      <View style={styles.rankListLeft}>
-                        <FontAwesome5 name={r.icon} size={20} color={r.color} style={{ width: 30 }} />
-                        <Text style={[styles.rankListName, isCurrent && styles.rankListNameCurrent]}>
-                          {r.name} {r.level}
-                        </Text>
-                      </View>
-                      <Text style={styles.rankListCost}>
-                        {r.isAce ? `${formatNumber(r.cost)}+ taps` : `${formatNumber(r.cost)} taps`}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
 
       </SafeAreaView>
     </LinearGradient>
@@ -561,6 +598,8 @@ const styles = StyleSheet.create({
   },
   titleContainer: {
     alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   title: {
     color: '#FFF',
@@ -600,7 +639,8 @@ const styles = StyleSheet.create({
   tinyCoin: {
     width: 16,
     height: 16,
-    marginRight: 6,
+    marginRight: 4,
+    borderRadius: 8,
   },
   statValue: {
     color: '#FFF',
@@ -609,8 +649,9 @@ const styles = StyleSheet.create({
   },
   statValueText: {
     color: '#FFF',
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
   balanceContainer: {
     flexDirection: 'row',
@@ -622,6 +663,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     marginRight: 10,
+    borderRadius: 20,
   },
   balanceText: {
     color: '#FFF',
@@ -675,18 +717,28 @@ const styles = StyleSheet.create({
     shadowRadius: 60,
   },
   innerCircle: {
-    width: width * 0.75,
-    height: width * 0.75,
-    borderRadius: width * 0.375,
+    width: width * 0.85,
+    height: width * 0.85,
+    borderRadius: width * 0.425,
     backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
-    overflow: 'hidden',
+  },
+  characterImageWrapper: {
+    width: '100%',
+    height: '100%',
+    borderRadius: width * 0.425,
   },
   characterImage: {
     width: '100%',
     height: '100%',
-    borderRadius: width * 0.375,
+    borderRadius: width * 0.425,
+  },
+  accessory: {
+    position: 'absolute',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
   },
   bottomNav: {
     flexDirection: 'row',
@@ -727,103 +779,257 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#1E293B',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: height * 0.8,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-  },
-  modalTitle: {
+  floatingText: {
+    position: 'absolute',
     color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  modalScroll: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-  },
-  rankListItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  rankListItemCurrent: {
-    backgroundColor: 'rgba(139, 92, 246, 0.2)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    marginHorizontal: -10,
-    borderBottomWidth: 0,
-  },
-  rankListLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  rankListName: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  rankListNameCurrent: {
-    color: '#8B5CF6',
-    fontWeight: 'bold',
-  },
-  rankListCost: {
-    color: '#94A3B8',
-    fontSize: 14,
+    fontSize: 40,
+    fontWeight: '900',
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    zIndex: 100,
   },
   energyContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingHorizontal: 25,
+    marginBottom: 15,
   },
   energyText: {
     color: '#FFF',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
   },
-  upgradeItem: {
+  mineContainer: {
+    flex: 1,
+    marginTop: 10,
+  },
+  mineTabs: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 10,
+    marginBottom: 15,
+  },
+  mineTab: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  mineTabActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  mineTabText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  mineTabTextActive: {
+    color: '#FFF',
+  },
+  cardsScroll: {
+    flex: 1,
+    paddingHorizontal: 15,
+  },
+  cardsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingBottom: 20,
+  },
+  upgradeCard: {
+    width: '48%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 15,
+  },
+  upgradeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 15,
-    borderRadius: 16,
-    marginBottom: 10,
+    marginBottom: 15,
   },
-  upgradeIconBox: {
-    width: 50,
-    height: 50,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
+  upgradeTitleBox: {
+    marginLeft: 10,
+    flex: 1,
+  },
+  upgradeTitle: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  upgradeProfitLabel: {
+    color: '#94A3B8',
+    fontSize: 9,
+  },
+  upgradeProfitValue: {
+    color: '#FFB86C',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  upgradeFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingTop: 8,
+  },
+  upgradeLevel: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  upgradeCostBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  upgradeCost: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  ranksContainer: {
+    flex: 1,
+    marginTop: 10,
+  },
+  ranksHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    marginBottom: 20,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backText: {
+    color: '#FFF',
+    fontSize: 16,
+    marginLeft: 5,
+  },
+  ranksTitle: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 20,
+  },
+  ranksScroll: {
+    flex: 1,
+    paddingHorizontal: 15,
+  },
+  rankItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  rankItemActive: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 0,
+    marginBottom: 5,
+  },
+  rankInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rankName: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  rankCurrentBadge: {
+    backgroundColor: '#FFB86C',
+    color: '#000',
+    fontSize: 10,
+    fontWeight: 'bold',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 10,
+  },
+  rankTaps: {
+    color: '#94A3B8',
+    fontSize: 14,
+  },
+  simpleTabContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 30,
   },
-  buyButton: {
+  simpleTabIcon: {
+    marginBottom: 20,
+  },
+  simpleTabTitle: {
+    color: '#FFF',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  simpleTabDesc: {
+    color: '#94A3B8',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 30,
+    lineHeight: 20,
+  },
+  simpleTabButton: {
+    backgroundColor: '#8B5CF6',
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    borderRadius: 25,
+  },
+  simpleTabButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  earnContainer: {
+    flex: 1,
+    marginTop: 10,
+    paddingHorizontal: 20,
+  },
+  earnTitle: {
+    color: '#FFF',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  taskList: {
+    flex: 1,
+  },
+  taskCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#8B5CF6',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 15,
+    marginBottom: 15,
+  },
+  taskIcon: {
+    width: 40,
+    textAlign: 'center',
+  },
+  taskInfo: {
+    flex: 1,
+    paddingHorizontal: 10,
+  },
+  taskTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  taskReward: {
+    color: '#FFB86C',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

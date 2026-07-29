@@ -1,26 +1,12 @@
-<<<<<<< HEAD
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, Dimensions, Platform, Animated, TouchableWithoutFeedback, ScrollView, Linking, Share } from 'react-native';
+import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, Dimensions, Platform, Animated, TouchableWithoutFeedback, ScrollView, Linking, Share, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-=======
-import 'react-native-url-polyfill/auto';
-import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/supabase';
->>>>>>> 2197e474aa10045cd0e97d0152527eed24b56209
 
-import LoginScreen from './src/screens/LoginScreen';
-import RegisterScreen from './src/screens/RegisterScreen';
-import GameScreen from './src/screens/GameScreen';
-
-const Stack = createNativeStackNavigator();
+const { width, height } = Dimensions.get('window');
 
 const FloatingText = ({ tap, onComplete }) => {
   const translateY = useRef(new Animated.Value(0)).current;
@@ -66,14 +52,133 @@ const FloatingText = ({ tap, onComplete }) => {
 };
 
 export default function App() {
-<<<<<<< HEAD
-  const [balance, setBalance] = useState(20000000);
+  const [session, setSession] = useState(null);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  const [referrerCode, setReferrerCode] = useState('');
+  const [invitedFriends, setInvitedFriends] = useState([]);
+  const [hasUsedCode, setHasUsedCode] = useState(false);
+  const [submittingCode, setSubmittingCode] = useState(false);
+
+  const [balance, setBalance] = useState(0);
   const [totalTaps, setTotalTaps] = useState(0);
   const [energy, setEnergy] = useState(2000);
   const [activeTab, setActiveTab] = useState('exchange');
   const [maxEnergy, setMaxEnergy] = useState(2000);
-  const [tapIncrement, setTapIncrement] = useState(1);
+  const [tapIncrement, setTapIncrement] = useState(0);
   const [profitPerHour, setProfitPerHour] = useState(0);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const { data: { session: activeSession } } = await supabase.auth.getSession();
+        if (activeSession) {
+          setSession(activeSession);
+        } else {
+          const fallback = await AsyncStorage.getItem('localFallbackSession');
+          if (fallback) {
+            setSession({ user: { email: fallback } });
+          }
+        }
+      } catch (e) {}
+    };
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+      if (newSession) {
+        setSession(newSession);
+      } else {
+        const fallback = await AsyncStorage.getItem('localFallbackSession');
+        if (!fallback) setSession(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert('Xatolik', 'Iltimos barcha maydonlarni to\'ldiring!');
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        Alert.alert(
+          'Tizimga kirish',
+          'Supabase ulanishi muvaffaqiyatsiz tugadi (yoki login/parol xato). Mahalliy offline rejimda kirishni xohlaysizmi?',
+          [
+            { text: 'Yo\'q', style: 'cancel' },
+            { 
+              text: 'Ha (Offline)', 
+              onPress: async () => {
+                await AsyncStorage.setItem('localFallbackSession', email.trim());
+                setSession({ user: { email: email.trim() } });
+              } 
+            }
+          ]
+        );
+      } else {
+        setSession(data.session);
+      }
+    } catch (e) {
+      Alert.alert('Xatolik', 'Kutilmagan xato yuz berdi.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!email || !password) {
+      Alert.alert('Xatolik', 'Iltimos barcha maydonlarni to\'ldiring!');
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        Alert.alert(
+          'Ro\'yxatdan o\'tish',
+          'Supabase ulanishi muvaffaqiyatsiz tugadi. Mahalliy offline rejimda hisob yaratishni xohlaysizmi?',
+          [
+            { text: 'Yo\'q', style: 'cancel' },
+            { 
+              text: 'Ha (Offline)', 
+              onPress: async () => {
+                await AsyncStorage.setItem('localFallbackSession', email.trim());
+                setSession({ user: { email: email.trim() } });
+              } 
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Muvaffaqiyatli', 'Ro\'yxatdan o\'tish yakunlandi! Tizimga kirdingiz.');
+        setSession(data.session);
+      }
+    } catch (e) {
+      Alert.alert('Xatolik', 'Kutilmagan xato yuz berdi.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
+    await AsyncStorage.removeItem('localFallbackSession');
+    setSession(null);
+  };
   
   const initialUpgrades = [
     { id: '1', title: 'Fan tokens', category: 'Markets', baseProfit: 150, baseCost: 100, level: 0, icon: 'ticket-outline', effectType: 'profit' },
@@ -91,10 +196,11 @@ export default function App() {
   const [taps, setTaps] = useState([]);
   const [completedTasks, setCompletedTasks] = useState([]);
 
-  // Load data when the app starts
+  // Load data when the app starts or session changes
   useEffect(() => {
     const loadData = async () => {
       try {
+        // 1. Always load local data first as a fast fallback
         const savedBalance = await AsyncStorage.getItem('notcoin_balance');
         const savedTaps = await AsyncStorage.getItem('notcoin_taps');
         const savedEnergy = await AsyncStorage.getItem('notcoin_energy');
@@ -115,12 +221,188 @@ export default function App() {
           setUpgrades(updated);
         }
         if (savedTasks !== null) setCompletedTasks(JSON.parse(savedTasks));
+
+        // 2. If logged in with a real Supabase account, sync values from Cloud
+        if (session && session.user && !session.user.fallback) {
+          // Load Profile (balance & energy)
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (profile) {
+            if (profile.balance !== null) setBalance(Number(profile.balance));
+            if (profile.energy !== null) setEnergy(Number(profile.energy));
+          }
+
+          // Load Inventory (mine upgrades count)
+          const { data: inventory } = await supabase
+            .from('inventory')
+            .select('*')
+            .eq('user_id', session.user.id);
+
+          if (inventory && inventory.length > 0) {
+            const updatedUpgrades = initialUpgrades.map(u => {
+              const count = inventory.filter(item => item.item_id === u.id).length;
+              return { ...u, level: count };
+            });
+            setUpgrades(updatedUpgrades);
+            
+            // Recalculate derived states from level counts
+            let profit = 0;
+            let energyMax = 2000;
+            let tapInc = 0;
+            
+            updatedUpgrades.forEach(u => {
+              if (u.level > 0) {
+                if (u.effectType === 'profit') {
+                  let itemProfit = 0;
+                  for (let i = 0; i < u.level; i++) {
+                    itemProfit += i === 0 ? u.baseProfit : Math.floor(u.baseProfit * 1.2);
+                  }
+                  profit += itemProfit;
+                } else if (u.effectType === 'energy') {
+                  energyMax += u.level * 500;
+                } else if (u.effectType === 'tap') {
+                  for (let lvl = 0; lvl < u.level; lvl++) {
+                    let add = 0;
+                    if (lvl === 0) add = 1;
+                    else if (lvl === 1) add = 2;
+                    else if (lvl === 2) add = 4;
+                    else if (lvl === 3) add = 6;
+                    else add = 2;
+                    tapInc += add;
+                  }
+                }
+              }
+            });
+            setProfitPerHour(profit);
+            setMaxEnergy(energyMax);
+            setTapIncrement(tapInc);
+          }
+
+          // Load Completed Tasks from Supabase
+          const { data: dbTasks } = await supabase
+            .from('user_tasks')
+            .select('task_id')
+            .eq('user_id', session.user.id);
+          
+          if (dbTasks) {
+            setCompletedTasks(dbTasks.map(t => t.task_id));
+          }
+        }
       } catch (e) {
         console.log('Error loading data', e);
       }
     };
     loadData();
-  }, []);
+  }, [session]);
+
+  // Sync balance and energy periodically to Supabase profiles
+  useEffect(() => {
+    const syncTimer = setTimeout(async () => {
+      if (session && session.user && !session.user.fallback) {
+        try {
+          await supabase.from('profiles').upsert({
+            id: session.user.id,
+            balance: balance,
+            energy: energy
+          });
+        } catch (e) {
+          console.log('Supabase sync error', e);
+        }
+      }
+    }, 3000);
+    return () => clearTimeout(syncTimer);
+  }, [balance, energy, session]);
+
+  const fetchFriendsData = async () => {
+    if (session && session.user && !session.user.fallback) {
+      try {
+        // Fetch invited friends
+        const { data: refs } = await supabase
+          .from('referrals')
+          .select('referee_id, profiles(email)')
+          .eq('referrer_id', session.user.id);
+        
+        if (refs) {
+          setInvitedFriends(refs.map(r => r.profiles?.email || 'Noma\'lum do\'st'));
+        }
+
+        // Check if current user has used a code
+        const { data: used } = await supabase
+          .from('referrals')
+          .select('*')
+          .eq('referee_id', session.user.id)
+          .single();
+        
+        if (used) {
+          setHasUsedCode(true);
+        }
+      } catch (e) {
+        console.log('Error fetching friends data', e);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchFriendsData();
+  }, [session, activeTab]);
+
+  const handleApplyReferrer = async () => {
+    if (!referrerCode.trim()) {
+      Alert.alert('Xatolik', 'Iltimos, taklif kodini kiriting!');
+      return;
+    }
+    if (referrerCode.trim() === session.user.id) {
+      Alert.alert('Xatolik', 'O\'z taklif kodingizni kirita olmaysiz!');
+      return;
+    }
+    setSubmittingCode(true);
+    try {
+      // Check if referrer exists
+      const { data: referrerProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', referrerCode.trim())
+        .single();
+
+      if (!referrerProfile) {
+        Alert.alert('Xatolik', 'Bunday taklif kodi topilmadi!');
+        setSubmittingCode(false);
+        return;
+      }
+
+      // Insert referral
+      const { error } = await supabase
+        .from('referrals')
+        .insert([{
+          referrer_id: referrerCode.trim(),
+          referee_id: session.user.id
+        }]);
+
+      if (error) {
+        Alert.alert('Xatolik', 'Taklif kodi allaqachon ishlatilgan!');
+      } else {
+        // Award referee (current user)
+        setBalance(prev => prev + 100000);
+        setHasUsedCode(true);
+        
+        // Award referrer in DB
+        await supabase
+          .from('profiles')
+          .update({ balance: Number(referrerProfile.balance) + 100000 })
+          .eq('id', referrerCode.trim());
+        
+        Alert.alert('Muvaffaqiyatli', 'Taklif kodi qabul qilindi! Siz 100,000 tangaga ega bo\'ldingiz!');
+      }
+    } catch (e) {
+      Alert.alert('Xatolik', 'Ulanishda xato yuz berdi.');
+    } finally {
+      setSubmittingCode(false);
+    }
+  };
 
   // Save data whenever it changes
   useEffect(() => {
@@ -190,10 +472,14 @@ export default function App() {
   ];
 
   const getRequiredTaps = (lvl) => {
-    if (lvl < RANK_THRESHOLDS.length) {
-      return RANK_THRESHOLDS[lvl];
+    if (lvl <= 1) return 0;
+    let required = 0;
+    let gap = 1000;
+    for (let i = 2; i <= lvl; i++) {
+      required += gap;
+      gap *= 2;
     }
-    return 100000000 + (lvl - 19) * 50000000;
+    return required;
   };
 
   const getLevelFromTaps = (taps) => {
@@ -238,22 +524,23 @@ export default function App() {
   };
 
   const handleTap = (e) => {
-    if (energy < tapIncrement) return;
+    const currentTapValue = tapValue + tapIncrement;
+    if (energy < currentTapValue) return;
 
-    setEnergy(prev => prev - tapIncrement);
-    setTotalTaps(prev => prev + tapIncrement);
+    setEnergy(prev => prev - currentTapValue);
+    setTotalTaps(prev => prev + currentTapValue);
     
     // Add floating text
     const newTap = {
       id: Date.now().toString() + Math.random().toString(),
       x: e.nativeEvent.locationX,
       y: e.nativeEvent.locationY,
-      value: `+${tapIncrement}`,
+      value: `+${currentTapValue}`,
     };
     setTaps(prev => [...prev, newTap]);
 
     // Increase balance
-    setBalance(prev => prev + tapIncrement);
+    setBalance(prev => prev + currentTapValue);
 
     // Bounce animation
     Animated.sequence([
@@ -275,7 +562,7 @@ export default function App() {
     setBalance(prev => prev + 1000000);
   };
 
-  const handleBuyUpgrade = (item) => {
+  const handleBuyUpgrade = async (item) => {
     const currentCost = item.level === 0 ? item.baseCost : Math.floor(item.baseCost * Math.pow(1.5, item.level));
     if (balance >= currentCost) {
       setBalance(prev => prev - currentCost);
@@ -300,12 +587,100 @@ export default function App() {
 
       // Increase upgrade level
       setUpgrades(prev => prev.map(u => u.id === item.id ? { ...u, level: u.level + 1 } : u));
+
+      // Save purchase to Supabase inventory table
+      if (session && session.user && !session.user.fallback) {
+        try {
+          await supabase.from('inventory').insert([{
+            user_id: session.user.id,
+            item_id: item.id,
+            name: item.title,
+            cost: currentCost,
+            icon: item.icon
+          }]);
+        } catch (e) {
+          console.log('Error saving purchase to Supabase', e);
+        }
+      }
     }
   };
 
   const formatNumber = (num) => {
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   };
+
+  if (!session) {
+    return (
+      <LinearGradient colors={['#182F58', '#0D162B', '#070C18']} style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <StatusBar style="light" />
+          <ScrollView contentContainerStyle={styles.authScrollContainer}>
+            <View style={styles.authCard}>
+              <Image source={require('./assets/hedgehog.png')} style={styles.authLogo} />
+              <Text style={styles.authTitle}>
+                {authMode === 'login' ? 'Tizimga Kirish' : "Ro'yxatdan O'tish"}
+              </Text>
+              <Text style={styles.authSubtitle}>
+                {authMode === 'login' ? 'Kirpi bilan o\'yinda ishtirok eting' : 'Yangi hisob yaratib tangalar to\'plang'}
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Email</Text>
+                <TextInput 
+                  style={styles.authInput}
+                  placeholder="example@mail.com"
+                  placeholderTextColor="#64748B"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Parol</Text>
+                <TextInput 
+                  style={styles.authInput}
+                  placeholder="********"
+                  placeholderTextColor="#64748B"
+                  secureTextEntry
+                  value={password}
+                  onChangeText={setPassword}
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <TouchableOpacity 
+                style={styles.authButton} 
+                onPress={authMode === 'login' ? handleLogin : handleRegister}
+                disabled={authLoading}
+              >
+                {authLoading ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.authButtonText}>
+                    {authMode === 'login' ? 'Kirish' : "Ro'yxatdan O'tish"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.switchModeButton}
+                onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+              >
+                <Text style={styles.switchModeText}>
+                  {authMode === 'login' 
+                    ? "Akkauntingiz yo'qmi? Ro'yxatdan o'tish" 
+                    : "Akkauntingiz bormi? Kirish"
+                  }
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </LinearGradient>
+    );
+  }
 
   return (
     <LinearGradient
@@ -324,8 +699,8 @@ export default function App() {
             <Text style={styles.title}>The Hedgehog</Text>
             <View style={styles.titleUnderline} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="grid-outline" size={20} color="#FFF" />
+          <TouchableOpacity style={styles.iconButton} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={20} color="#FFF" />
           </TouchableOpacity>
         </View>
 
@@ -335,7 +710,7 @@ export default function App() {
             <Text style={styles.statLabel}>Earn per tap</Text>
             <View style={styles.statValueRow}>
               <Image source={require('./assets/coin.png')} style={styles.tinyCoin} />
-              <Text style={styles.statValue}>+{formatNumber(tapIncrement)}</Text>
+              <Text style={styles.statValue}>+{formatNumber(tapValue + tapIncrement)}</Text>
             </View>
           </View>
           <View style={styles.statBox}>
@@ -494,27 +869,95 @@ export default function App() {
             </ScrollView>
           </View>
         ) : activeTab === 'friends' ? (
-          <View style={styles.simpleTabContainer}>
-            <FontAwesome5 name="user-friends" size={60} color="#FFB86C" style={styles.simpleTabIcon} />
-            <Text style={styles.simpleTabTitle}>Invite Friends</Text>
-            <Text style={styles.simpleTabDesc}>Invite your friends and get 100,000 coins for both of you!</Text>
-            <TouchableOpacity 
-              style={styles.simpleTabButton}
-              onPress={async () => {
-                try {
-                  const result = await Share.share({
-                    message: 'Join me in this awesome game and let\'s earn together! https://t.me/my_bot',
-                  });
-                  if (result.action === Share.sharedAction) {
-                    setBalance(prev => prev + 100000);
-                  }
-                } catch (error) {
-                  console.log(error);
-                }
-              }}
-            >
-              <Text style={styles.simpleTabButtonText}>Invite a Friend</Text>
-            </TouchableOpacity>
+          <View style={styles.friendsContainer}>
+            <View style={styles.friendsHeaderCard}>
+              <FontAwesome5 name="user-friends" size={40} color="#FFB86C" style={styles.friendsHeaderIcon} />
+              <Text style={styles.friendsTitle}>Do'stlarni Taklif Qiling</Text>
+              <Text style={styles.friendsDesc}>Ikki do'st uchun ham 100,000 tangadan bonus oling!</Text>
+            </View>
+
+            <View style={styles.referralSection}>
+              <View style={styles.cardRow}>
+                <View style={[styles.codeCard, { marginRight: 10 }]}>
+                  <Text style={styles.cardLabel}>Sizning Taklif Kodinigiz</Text>
+                  <View style={styles.codeRowInline}>
+                    <Text style={styles.codeTextInline} numberOfLines={1} ellipsizeMode="middle">
+                      {session?.user?.id || ''}
+                    </Text>
+                    <TouchableOpacity 
+                      style={styles.inlineCopyButton}
+                      onPress={async () => {
+                        try {
+                          await Share.share({
+                            message: `Salom! Hedgehog o'yiniga qo'shiling va 100,000 tanga bonus oling. Mening taklif kodim: ${session?.user?.id}`,
+                          });
+                        } catch (e) {}
+                      }}
+                    >
+                      <Ionicons name="share-social-outline" size={16} color="#000" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.codeCard}>
+                  <Text style={styles.cardLabel}>Kodni Faollashtirish</Text>
+                  {hasUsedCode ? (
+                    <View style={styles.codeUsedBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color="#4ADE80" style={{marginRight: 4}} />
+                      <Text style={styles.codeUsedTextInline}>Faol</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.inlineInputRow}>
+                      <TextInput 
+                        style={styles.inlineInput}
+                        placeholder="Kod"
+                        placeholderTextColor="#64748B"
+                        value={referrerCode}
+                        onChangeText={setReferrerCode}
+                        autoCapitalize="none"
+                      />
+                      <TouchableOpacity 
+                        style={styles.inlineApplyButton} 
+                        onPress={handleApplyReferrer}
+                        disabled={submittingCode}
+                      >
+                        {submittingCode ? (
+                          <ActivityIndicator color="#000" size="small" />
+                        ) : (
+                          <Ionicons name="arrow-forward" size={16} color="#000" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            <Text style={styles.friendsSubTitle}>Siz Taklif Qilgan Do'stlar ({invitedFriends.length})</Text>
+            
+            <ScrollView style={styles.friendsListScroll} showsVerticalScrollIndicator={false}>
+              {invitedFriends.length === 0 ? (
+                <View style={styles.noFriendsContainer}>
+                  <Ionicons name="people-outline" size={48} color="#475569" />
+                  <Text style={styles.noFriendsText}>Hozircha hech kim taklif qilinmagan.</Text>
+                </View>
+              ) : (
+                invitedFriends.map((email, idx) => (
+                  <View key={idx} style={styles.friendRow}>
+                    <View style={styles.friendAvatar}>
+                      <Text style={styles.friendAvatarText}>{email[0].toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.friendInfoCol}>
+                      <Text style={styles.friendEmail} numberOfLines={1}>{email}</Text>
+                      <Text style={styles.friendJoinedText}>Muvaffaqiyatli ulandi</Text>
+                    </View>
+                    <View style={styles.friendRewardBadge}>
+                      <Text style={styles.friendRewardText}>+100K</Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
           </View>
         ) : activeTab === 'earn' ? (
           <View style={styles.earnContainer}>
@@ -531,14 +974,34 @@ export default function App() {
                   <TouchableOpacity 
                     key={task.id}
                     style={[styles.taskCard, isCompleted && {opacity: 0.8}]}
-                    onPress={() => {
+                    onPress={async () => {
                       if (isCompleted) {
                         setBalance(prev => prev - task.reward);
                         setCompletedTasks(prev => prev.filter(id => id !== task.id));
+                        if (session && session.user && !session.user.fallback) {
+                          try {
+                            await supabase
+                              .from('user_tasks')
+                              .delete()
+                              .match({ user_id: session.user.id, task_id: task.id });
+                          } catch (e) {
+                            console.log('Error deleting task from Supabase', e);
+                          }
+                        }
                       } else {
                         Linking.openURL(task.url);
                         setBalance(prev => prev + task.reward);
                         setCompletedTasks(prev => [...prev, task.id]);
+                        if (session && session.user && !session.user.fallback) {
+                          try {
+                            await supabase.from('user_tasks').insert([{
+                              user_id: session.user.id,
+                              task_id: task.id
+                            }]);
+                          } catch (e) {
+                            console.log('Error saving task to Supabase', e);
+                          }
+                        }
                       }
                     }}
                   >
@@ -1043,67 +1506,257 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
+  authScrollContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  authCard: {
+    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    borderRadius: 24,
+    padding: 25,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  authLogo: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 20,
+  },
+  authTitle: {
+    color: '#FFF',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  authSubtitle: {
+    color: '#94A3B8',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 25,
+  },
+  inputGroup: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  inputLabel: {
+    color: '#94A3B8',
+    fontSize: 14,
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  authInput: {
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    color: '#FFF',
+    fontSize: 16,
+  },
+  authButton: {
+    width: '100%',
+    backgroundColor: '#4ADE80',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 15,
+  },
+  authButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  switchModeButton: {
+    marginTop: 20,
+  },
+  switchModeText: {
+    color: '#4ADE80',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  friendsContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  friendsHeaderCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  friendsHeaderIcon: {
+    marginBottom: 10,
+  },
+  friendsTitle: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  friendsDesc: {
+    color: '#94A3B8',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  referralSection: {
+    marginBottom: 20,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  codeCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+  },
+  cardLabel: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  codeRowInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 10,
+    padding: 8,
+    justifyContent: 'space-between',
+  },
+  codeTextInline: {
+    color: '#FFB86C',
+    fontSize: 11,
+    fontWeight: 'bold',
+    flex: 1,
+    marginRight: 6,
+  },
+  inlineCopyButton: {
+    backgroundColor: '#FFB86C',
+    borderRadius: 6,
+    padding: 4,
+  },
+  codeUsedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(74, 222, 128, 0.1)',
+    borderRadius: 10,
+    padding: 8,
+    justifyContent: 'center',
+  },
+  codeUsedTextInline: {
+    color: '#4ADE80',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  inlineInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 10,
+    padding: 4,
+  },
+  inlineInput: {
+    flex: 1,
+    color: '#FFF',
+    fontSize: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  inlineApplyButton: {
+    backgroundColor: '#4ADE80',
+    borderRadius: 8,
+    padding: 6,
+  },
+  friendsSubTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  friendsListScroll: {
+    flex: 1,
+  },
+  noFriendsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noFriendsText: {
+    color: '#64748B',
+    fontSize: 13,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  friendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 14,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  friendAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFB86C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  friendAvatarText: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  friendInfoCol: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  friendEmail: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  friendJoinedText: {
+    color: '#64748B',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  friendRewardBadge: {
+    backgroundColor: 'rgba(255, 184, 108, 0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  friendRewardText: {
+    color: '#FFB86C',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
 });
-=======
-  const [isLoading, setIsLoading] = useState(true);
-  const [session, setSession] = useState(null);
-
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          setSession(session);
-        } else {
-          const localFallback = await AsyncStorage.getItem('localFallbackSession');
-          if (localFallback) {
-            setSession({ fallback: true });
-          }
-        }
-      } catch (error) {
-        console.error('Session check error:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    checkSession();
-
-    supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session) {
-        setSession(session);
-      } else {
-        const localFallback = await AsyncStorage.getItem('localFallbackSession');
-        setSession(localFallback ? { fallback: true } : null);
-      }
-    });
-  }, []);
-
-  if (isLoading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
-        <ActivityIndicator size="large" color="#4ADE80" />
-      </View>
-    );
-  }
-
-  return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator 
-          initialRouteName={session ? 'Game' : 'Login'}
-          screenOptions={{ headerShown: false }}
-        >
-          {session ? (
-            <Stack.Screen name="Game" component={GameScreen} />
-          ) : (
-            <>
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="Register" component={RegisterScreen} />
-            </>
-          )}
-        </Stack.Navigator>
-      </NavigationContainer>
-    </SafeAreaProvider>
-  );
-}
->>>>>>> 2197e474aa10045cd0e97d0152527eed24b56209
